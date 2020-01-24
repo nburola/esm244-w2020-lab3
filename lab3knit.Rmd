@@ -1,0 +1,198 @@
+---
+title: "Lab 3"
+author: "Nathaniel Burola"
+date: "1/23/2020"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE,
+                      warning = FALSE)
+
+library(tidyverse)
+library(janitor)
+library(here)
+library(sf)
+library(tmap)
+```
+
+## Binary Logisitic Regression: Penguins! 
+
+Read in the data: 
+```{r}
+gentoo <- read_csv("gentoo_lter.csv")
+chinstrap <- read_csv("chinstrap_lter.csv")
+
+#Want to combine these data frames in order to get two data frames together 
+#If you are ever unclear about how to join windows, then do fulljoin, and wrangle them together in order to get windows together 
+
+penguins <- full_join(chinstrap, gentoo) %>%  
+  clean_names() %>% #clean_names puts everything into a lower case formatting 
+  mutate(sex = str_to_lower(sex)) %>%  #sex column has been put into lower case 
+  filter(sex %in% c("male", "female")) #in operator is a way of doing a more elegant or statement (look for anything in the sex column that matches anything in the string)
+
+#mutate is used to add a new column to your data frame OR override an existing data column 
+```
+
+Now let us graph this:  
+```{r}
+#Two penguin universe where it is going to be one or the other species 
+
+ggplot(data = penguins, aes(x = sex, y = body_mass_g)) + 
+  geom_jitter(
+    aes(color = sex, 
+        pch = sex)
+  ) + 
+  facet_wrap(~species)
+
+#Mass of 4900 grams makes it hard to tell whether it is a chinstrap penguin or a gentoo penguin with their probabilities. Want to align outcomes with bionomial logsitic expression 
+```
+
+Code Chinstrap Penguins as (1) and Gentoo penguins as (0): 
+```{r}
+#Can write an if statement where chinstrap penguins are 1 and gentoo penguins are 0 but will do something else 
+
+#Can use the unique function unique(penguins$species) to figure out how species are directly written in the data feame ($ sign acts as a filter to get species)
+
+penguin_bin <- penguins %>% 
+  mutate(
+    sp_binary = case_when(
+      species == "Chinstrap penguin (Pygoscelis antarctica)" ~ 1, 
+      species == "Gentoo penguin (Pygoscelis papua)" ~ 0, 
+    )
+  )
+```
+
+Now let us run our binary logisitic regression: 
+```{r}
+#Running glm is a generalized linear model which needs a lot of information such as bionomial logisitic regression
+
+#Write the summary function to get a window of it 
+penguin_blr <- glm(sp_binary ~ sex + body_mass_g, 
+                   family = binomial, 
+                   data = penguin_bin)
+
+summary(penguin_blr)
+
+#Negative value associated with body mass (negative relationship between increasing body mass the probability of being a chinstrap penguin) (chinstrap penguin = 1)
+#Instead, it would be the increasing body mass would INCREASE the probability of being  a gentoo penguin 
+#Impact of the probability on the one outcome (specifically coded as chinstrap penguin as 1 which is set as a reference level)
+```
+
+Let Us Make Some Predictions For Penguins (classifications... kind of)
+1. What is the probability that a penguin is a chinstrap penguin if it weighs 4500 grams it is male? 
+```{r}
+#Going to make new data frames that contain the same variables that the model is expecting but will find the predictions in the data frame 
+
+#Better chance of a chinstrap penguin being at 4500 grams than a gentoo penguin 
+
+#Creating a new data frame with the variable name and the entry name that is used to create the model NEEDS to match otherwise it will not be able to figure out what is wrong
+
+df_m4500 <- data.frame(sex = "male", body_mass_g = 4500)
+
+#default in predict function is to use whatever the link is to make the prediction 
+#predict function can take a lot of functions 
+# Find log odds of this penguin being chinstrap 
+
+m4500_logodds <- predict(penguin_blr, newdata = df_m4500, type = "link") 
+
+m4500_prob <- predict(penguin_blr, newdata = df_m4500, type = "response") 
+
+m4500_prob
+
+#Based on our regression using probability, there is a 98.28% chance that a male penguin weighing 4500 grams is a chinstrap penguin. 
+```
+
+2. What is the probability that a penguin is chinstrap if it is recorded as female of 4000 grams? 
+```{r}
+df_f4000 <- data.frame(sex = "female", body_mass_g = 4000) #Creating a new data frame with the fields of sex and body mass of 4000g 
+
+df_f4000logodds <- predict(penguin_blr, newdata = df_f4000, type = "link") #Calculating the log odds of a female penguin at 4000 grams 
+
+f4000_prob <- predict(penguin_blr, newdata = df_f4000, type = "response") #Calculating the probability of a female penguin at 4000 grams 
+
+f4000_prob
+
+#Based on our regression using probability, there is a 65.40% chance that a female penguin weighing 4000 grams is a chinstrap penguin. 
+```
+
+Now let us make an entire data frame & use it to make them visualize logisitic regression outcomes 
+
+```{r}
+#Creating a sequence from 3000 - 6000 in amounts of 200 
+#Putting in the rep function ahead of (seq...) makes it repeat X number of times in this case it will be 2. 
+#Putting male and female with rep will cause the males and females to go from 3000 - 6000 in terms of body mass with grams
+penguins_mock <- data.frame(
+  body_mass_g = rep(seq(3000, 6000, length = 200), 2), 
+  sex = c(rep("male", 200), rep("female", 200))
+)
+
+penguins_mock
+
+```
+
+Let Us Use Those To Make Predictions For All Of Them 
+```{r}
+full_predict <- predict(penguin_blr, newdata = penguins_mock, type = "response", se.fit = TRUE) 
+
+# Get those into a data frame along with the mock data used to create them 
+final_df <- data.frame(penguins_mock, 
+                       full_predict$fit, 
+                       full_predict$se.fit)
+
+colnames(final_df) <- c("penguin_mass", "sex", "probability", "se")
+
+final_df
+
+```
+
+Now Let Us Graph It 
+```{r}
+ggplot(data = final_df, aes(x = penguin_mass, y = probability)) +
+  geom_line(aes(color = sex)) +
+  scale_x_continuous(limits = c(3500, 5500)) +
+  geom_ribbon(aes(ymin = probability - se, ymax = probability + se, fill = sex), alpha = 0.3) +
+  labs(x = "Penguin body mass (g)",
+       y = "Probability of being Chinstrap") +
+  theme_minimal()
+```
+
+## NOW some spatial data with sf 
+
+Read in the spatial data using read_sf()
+```{r}
+#Read sf function can let us read all of the functions in the cougar_connections folder 
+
+cougars <- read_sf(dsn = here("cougar_connections"), layer = "ds1014") %>%  
+  clean_names()
+
+```
+
+```{r}
+large_corridors <- cougars %>%  
+  filter(Area_ac > 20000) %>%  
+  select(Area_ac)
+
+plot(large_corridors)
+```
+
+```{r}
+cougar_sub <- cougars %>%  
+  select(elev_mean) 
+```
+
+In GGPlot, you can still make static plots: 
+```{r}
+ggplot(data = cougar_sub) + 
+  geom_sf(aes(fill = elev_mean), 
+          color = NA)
+```
+
+```{r}
+tmap_mode("view")
+
+tm_shape(cougar_sub) +
+  tm_fill("elev_mean") +
+  tm_basemap("Stamen.Terrain")
+```
+
